@@ -33,6 +33,7 @@ public class MonkeyKing: NSObject {
 
         case WeChat(appID: String, appKey: String?)
         case QQ(appID: String)
+        case QQi(appID: String)
         case Weibo(appID: String, appKey: String, redirectURL: String)
         case Pocket(appID: String)
         case Alipay(appID: String)
@@ -43,6 +44,8 @@ public class MonkeyKing: NSObject {
                 return sharedMonkeyKing.canOpenURL(URLString: "weixin://")
             case .QQ:
                 return sharedMonkeyKing.canOpenURL(URLString: "mqqapi://")
+            case .QQi:
+                return sharedMonkeyKing.canOpenURL(URLString: "mqqiapi://")
             case .Weibo:
                 return sharedMonkeyKing.canOpenURL(URLString: "weibosdk://request")
             case .Pocket:
@@ -57,6 +60,8 @@ public class MonkeyKing: NSObject {
             case .WeChat(let appID, _):
                 return appID
             case .QQ(let appID):
+                return appID
+            case .QQi(let appID):
                 return appID
             case .Weibo(let appID, _, _):
                 return appID
@@ -73,7 +78,7 @@ public class MonkeyKing: NSObject {
 
         public var canWebOAuth: Bool {
             switch self {
-            case .QQ, .Weibo, .Pocket:
+            case .QQ, .QQi, .Weibo, .Pocket:
                 return true
             default:
                 return false
@@ -83,6 +88,7 @@ public class MonkeyKing: NSObject {
 
     public enum SupportedPlatform {
         case QQ
+        case QQi
         case WeChat
         case Weibo
         case Pocket(requestToken: String)
@@ -103,6 +109,10 @@ public class MonkeyKing: NSObject {
                     }
                 case .QQ:
                     if case .QQ = account {
+                        sharedMonkeyKing.accountSet.remove(oldAccount)
+                    }
+                case .QQi:
+                    if case .QQi = account {
                         sharedMonkeyKing.accountSet.remove(oldAccount)
                     }
                 case .Weibo:
@@ -429,6 +439,7 @@ extension MonkeyKing {
             }
         }
         case QQ(QQSubtype)
+        case QQi(QQSubtype)
 
         public enum WeiboSubtype {
             case Default(info: Info, accessToken: String?)
@@ -670,6 +681,107 @@ extension MonkeyKing {
                 }
             }
 
+            if !openURL(URLString: qqSchemeURLString) {
+                completionHandler(result: false)
+            }
+
+        case .QQi(let type):
+
+            let callbackName = appID.monkeyking_QQCallbackName
+
+            var qqSchemeURLString = "mqqiapi://share/to_fri?"
+            if let encodedAppDisplayName = NSBundle.mainBundle().monkeyking_displayName?.monkeyking_base64EncodedString {
+                qqSchemeURLString += "thirdAppDisplayName=" + encodedAppDisplayName
+            } else {
+                qqSchemeURLString += "thirdAppDisplayName=" + "nixApp" // Should not be there
+            }
+
+            qqSchemeURLString += "&version=1&cflag=\(type.scene)"
+            qqSchemeURLString += "&callback_type=scheme&generalpastboard=1"
+            qqSchemeURLString += "&callback_name=\(callbackName)"
+
+            qqSchemeURLString += "&src_type=app&shareType=0&file_type="
+
+            if let media = type.info.media {
+
+                func handleNewsWithURL(URL: NSURL, mediaType: String?) {
+
+                    if let thumbnail = type.info.thumbnail, thumbnailData = UIImageJPEGRepresentation(thumbnail, 1) {
+                        let dic = ["previewimagedata": thumbnailData]
+                        let data = NSKeyedArchiver.archivedDataWithRootObject(dic)
+                        UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqqi.api.apiLargeData")
+                    }
+
+                    qqSchemeURLString += mediaType ?? "news"
+
+                    guard let encodedURLString = URL.absoluteString.monkeyking_base64AndURLEncodedString else {
+                        completionHandler(result: false)
+                        return
+                    }
+
+                    qqSchemeURLString += "&url=\(encodedURLString)"
+                }
+
+                switch media {
+
+                case .URL(let URL):
+
+                    handleNewsWithURL(URL, mediaType: "news")
+
+                case .Image(let image):
+
+                    guard let imageData = UIImageJPEGRepresentation(image, 1) else {
+                        completionHandler(result: false)
+                        return
+                    }
+
+                    var dic = [
+                        "file_data": imageData,
+                    ]
+                    if let thumbnail = type.info.thumbnail, thumbnailData = UIImageJPEGRepresentation(thumbnail, 1) {
+                        dic["previewimagedata"] = thumbnailData
+                    }
+
+                    let data = NSKeyedArchiver.archivedDataWithRootObject(dic)
+
+                    UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqqi.api.apiLargeData")
+
+                    qqSchemeURLString += "img"
+
+                case .Audio(let audioURL, _):
+                    handleNewsWithURL(audioURL, mediaType: "audio")
+
+                case .Video(let URL):
+                    handleNewsWithURL(URL, mediaType: nil) // No video type, default is news type.
+
+                case .File(let fileData):
+
+                    let data = NSKeyedArchiver.archivedDataWithRootObject(["file_data": fileData])
+                    UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqqi.api.apiLargeData")
+
+                    qqSchemeURLString += "localFile"
+
+                    if let filename = type.info.description?.monkeyking_URLEncodedString {
+                        qqSchemeURLString += "&fileName=\(filename)"
+                    }
+                }
+
+                if let encodedTitle = type.info.title?.monkeyking_base64AndURLEncodedString {
+                    qqSchemeURLString += "&title=\(encodedTitle)"
+                }
+
+                if let encodedDescription = type.info.description?.monkeyking_base64AndURLEncodedString {
+                    qqSchemeURLString += "&objectlocation=pasteboard&description=\(encodedDescription)"
+                }
+                
+            } else { // Share Text
+                qqSchemeURLString += "text&file_data="
+                
+                if let encodedDescription = type.info.description?.monkeyking_base64AndURLEncodedString {
+                    qqSchemeURLString += "\(encodedDescription)"
+                }
+            }
+            
             if !openURL(URLString: qqSchemeURLString) {
                 completionHandler(result: false)
             }
@@ -944,6 +1056,35 @@ extension MonkeyKing {
                 UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.tencent\(appID)")
 
                 openURL(URLString: "mqqOpensdkSSoLogin://SSoLogin/tencent\(appID)/com.tencent.tencent\(appID)?generalpastboard=1")
+
+                return
+            }
+
+            // Web OAuth
+
+            let accessTokenAPI = "http://xui.ptlogin2.qq.com/cgi-bin/xlogin?appid=716027609&pt_3rd_aid=209656&style=35&s_url=http%3A%2F%2Fconnect.qq.com&refer_cgi=m_authorize&client_id=\(appID)&redirect_uri=auth%3A%2F%2Fwww.qq.com&response_type=token&scope=\(scope)"
+            addWebViewByURLString(accessTokenAPI)
+
+        case .QQi(let appID):
+
+            let scope = scope ?? ""
+            guard !account.isAppInstalled else {
+                let appName = NSBundle.mainBundle().monkeyking_displayName ?? "nixApp"
+                let dic = ["app_id": appID,
+                    "app_name": appName,
+                    "client_id": appID,
+                    "response_type": "token",
+                    "scope": scope,
+                    "sdkp": "i",
+                    "sdkv": "2.9",
+                    "status_machine": UIDevice.currentDevice().model,
+                    "status_os": UIDevice.currentDevice().systemVersion,
+                    "status_version": UIDevice.currentDevice().systemVersion]
+
+                let data = NSKeyedArchiver.archivedDataWithRootObject(dic)
+                UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.tencent\(appID)")
+
+                openURL(URLString: "mqqiOpensdkSSoLogin://SSoLogin/tencent\(appID)/com.tencent.tencent\(appID)?generalpastboard=1")
 
                 return
             }
@@ -1423,6 +1564,12 @@ private extension Set {
                     return account
                 }
             }
+        case .QQi:
+            for account in accountSet {
+                if case .QQi = account {
+                    return account
+                }
+            }
         case .Weibo:
             for account in accountSet {
                 if case .Weibo = account {
@@ -1461,6 +1608,12 @@ private extension Set {
         case .QQ:
             for account in accountSet {
                 if case .QQ = account {
+                    return account
+                }
+            }
+        case .QQi:
+            for account in accountSet {
+                if case .QQi = account {
                     return account
                 }
             }
