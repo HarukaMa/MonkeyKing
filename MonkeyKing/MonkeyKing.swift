@@ -709,7 +709,7 @@ extension MonkeyKing {
                     if let thumbnail = type.info.thumbnail, thumbnailData = UIImageJPEGRepresentation(thumbnail, 1) {
                         let dic = ["previewimagedata": thumbnailData]
                         let data = NSKeyedArchiver.archivedDataWithRootObject(dic)
-                        UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqqi.api.apiLargeData")
+                        UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqq.api.apiLargeData")
                     }
 
                     qqSchemeURLString += mediaType ?? "news"
@@ -744,7 +744,7 @@ extension MonkeyKing {
 
                     let data = NSKeyedArchiver.archivedDataWithRootObject(dic)
 
-                    UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqqi.api.apiLargeData")
+                    UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqq.api.apiLargeData")
 
                     qqSchemeURLString += "img"
 
@@ -757,7 +757,7 @@ extension MonkeyKing {
                 case .File(let fileData):
 
                     let data = NSKeyedArchiver.archivedDataWithRootObject(["file_data": fileData])
-                    UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqqi.api.apiLargeData")
+                    UIPasteboard.generalPasteboard().setData(data, forPasteboardType: "com.tencent.mqq.api.apiLargeData")
 
                     qqSchemeURLString += "localFile"
 
