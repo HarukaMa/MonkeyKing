@@ -1,5 +1,5 @@
 //
-//  SimpleNetworking.swift
+//  Networking.swift
 //  MonkeyKing
 //
 //  Created by Limon on 15/9/25.
@@ -7,15 +7,14 @@
 //
 
 import Foundation
-import MonkeyKing
 
-class SimpleNetworking {
+class Networking {
 
-    static let sharedInstance = SimpleNetworking()
+    static let sharedInstance = Networking()
     fileprivate let session = URLSession.shared
 
     typealias NetworkingResponseHandler = ([String: Any]?, URLResponse?, Error?) -> Void
-
+    
     enum Method: String {
         case get = "GET"
         case post = "POST"
@@ -26,15 +25,24 @@ class SimpleNetworking {
         case urlEncodedInURL
         case json
 
-        func encode(_ urlRequest: URLRequest, parameters: [String: Any]?) -> URLRequest {
+        func encode(_ request: URLRequest, parameters: [String: Any]?) -> URLRequest {
 
             guard let parameters = parameters else {
-                return urlRequest
+                return request
             }
 
-            var mutableURLRequest = urlRequest
+            guard let httpMethod = request.httpMethod else {
+                return request
+            }
+
+            guard let url = request.url else {
+                return request
+            }
+
+            var mutableURLRequest = request
 
             switch self {
+
             case .url, .urlEncodedInURL:
                 func query(_ parameters: [String: Any]) -> String {
                     var components: [(String, String)] = []
@@ -63,12 +71,13 @@ class SimpleNetworking {
                     }
                 }
 
-                if let method = Method(rawValue: mutableURLRequest.httpMethod!) , encodesParametersInURL(method) {
-                    if var urlComponents = URLComponents(url: mutableURLRequest.url!, resolvingAgainstBaseURL: false) {
+                if let method = Method(rawValue: httpMethod), encodesParametersInURL(method) {
+                    if var urlComponents = URLComponents(url: url, resolvingAgainstBaseURL: false) {
                         let percentEncodedQuery = (urlComponents.percentEncodedQuery.map { $0 + "&" } ?? "") + query(parameters)
                         urlComponents.percentEncodedQuery = percentEncodedQuery
                         mutableURLRequest.url = urlComponents.url
                     }
+
                 } else {
                     if mutableURLRequest.value(forHTTPHeaderField: "Content-Type") == nil {
                         mutableURLRequest.setValue(
@@ -77,8 +86,12 @@ class SimpleNetworking {
                         )
                     }
 
-                    mutableURLRequest.httpBody = query(parameters).data(using: .utf8, allowLossyConversion: false)
+                    mutableURLRequest.httpBody = query(parameters).data(
+                        using: .utf8,
+                        allowLossyConversion: false
+                    )
                 }
+
             case .json:
                 do {
                     let options = JSONSerialization.WritingOptions()
@@ -87,11 +100,13 @@ class SimpleNetworking {
                     mutableURLRequest.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
                     mutableURLRequest.setValue("application/json", forHTTPHeaderField: "X-Accept")
                     mutableURLRequest.httpBody = data
-                } catch {
+
+                } catch let error {
+                    print("error: \(error)")
                 }
             }
 
-            return mutableURLRequest as URLRequest
+            return mutableURLRequest
         }
 
         func queryComponents(_ key: String, _ value: Any) -> [(String, String)] {
@@ -101,7 +116,7 @@ class SimpleNetworking {
                 for (nestedKey, value) in dictionary {
                     components += queryComponents("\(key)[\(nestedKey)]", value)
                 }
-            } else if let array = value as? [Any] {
+            } else if let array = value as? [AnyObject] {
                 for value in array {
                     components += queryComponents("\(key)[]", value)
                 }
@@ -116,36 +131,36 @@ class SimpleNetworking {
             let generalDelimitersToEncode = ":#[]@" // does not include "?" or "/" due to RFC 3986 - Section 3.4
             let subDelimitersToEncode = "!$&'()*+,;="
 
-            let allowedCharacterSet = (CharacterSet.urlQueryAllowed as NSCharacterSet).mutableCopy() as! NSMutableCharacterSet
-            allowedCharacterSet.removeCharacters(in: generalDelimitersToEncode + subDelimitersToEncode)
+            var allowedCharacterSet = CharacterSet.urlQueryAllowed
+            allowedCharacterSet.remove(charactersIn: generalDelimitersToEncode + subDelimitersToEncode)
 
             var escaped = ""
 
             if #available(iOS 8.3, *) {
-                escaped = string.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet as CharacterSet) ?? string
+                escaped = string.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? string
 
             } else {
                 let batchSize = 50
                 var index = string.startIndex
-
+                
                 while index != string.endIndex {
                     let startIndex = index
                     let endIndex = string.index(index, offsetBy: batchSize, limitedBy: string.endIndex) ?? startIndex
                     let range = startIndex..<endIndex
-
+                    
                     let substring = string.substring(with: range)
-
-                    escaped += substring.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet as CharacterSet) ?? substring
-
+                    
+                    escaped += substring.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? substring
+                    
                     index = endIndex
                 }
             }
-
+            
             return escaped
         }
     }
 
-    func request(_ urlString: String, method: Method, parameters: [String: Any]? = nil, encoding: ParameterEncoding = .url, headers: [String: String]? = nil, completionHandler: @escaping NetworkingResponseHandler) {
+    func request(_ urlString: String, method: Method, parameters: [String: Any]? = nil, encoding: ParameterEncoding = .url, headers: [String: String]? = nil, completionHandler: @escaping ([String: Any]?, URLResponse?, Error?) -> Void) {
 
         guard let url = URL(string: urlString) else {
             return
@@ -167,13 +182,14 @@ class SimpleNetworking {
             var json: [String: Any]?
 
             defer {
-                completionHandler(json, response, error)
+                DispatchQueue.main.async {
+                    completionHandler(json, response, error as Error?)
+                }
             }
 
-            guard
-                let validData = data,
+            guard let validData = data,
                 let jsonData = try? JSONSerialization.jsonObject(with: validData, options: .allowFragments) as? [String: Any] else {
-                    print("sample networking requet failt: JSON could not be serialized because input data was nil.")
+                    print("requst fail: JSON could not be serialized because input data was nil.")
                     return
             }
 
@@ -183,7 +199,7 @@ class SimpleNetworking {
         task.resume()
     }
 
-    func upload(_ urlString: String, parameters: [String: Any], completionHandler: @escaping NetworkingResponseHandler) {
+    func upload(_ urlString: String, parameters: [String: Any], completionHandler: @escaping ([String: Any]?, URLResponse?, Error?) -> Void) {
 
         let tuple = urlRequestWithComponents(urlString, parameters: parameters)
 
@@ -191,37 +207,37 @@ class SimpleNetworking {
             return
         }
 
-        let uploadTask = session.uploadTask(with: request, from: data) { (data, response, error) in
+        let uploadTask = session.uploadTask(with: request, from: data, completionHandler: { (data, response, error) in
             var json: [String: Any]?
 
             defer {
-                completionHandler(json, response, error)
+                DispatchQueue.main.async {
+                    completionHandler(json, response, error as Error?)
+                }
             }
 
-            guard
-                let validData = data,
+            guard let validData = data,
                 let jsonData = try? JSONSerialization.jsonObject(with: validData, options: .allowFragments) as? [String: Any] else {
-                    print("sample networking upload failt: JSON could not be serialized because input data was nil.")
+                    print("upload fail: JSON could not be serialized because input data was nil.")
                     return
             }
 
             json = jsonData
-        }
+        }) 
 
         uploadTask.resume()
     }
 
-    fileprivate func urlRequestWithComponents(_ urlString: String, parameters: [String: Any], encoding: ParameterEncoding = .url) -> (request: URLRequest?, data: Data?) {
+    func urlRequestWithComponents(_ urlString: String, parameters: [String: Any], encoding: ParameterEncoding = .url) -> (request: URLRequest?, data: Data?) {
 
         guard let url = URL(string: urlString) else {
             return (nil, nil)
         }
 
-        // create url request to send
         var mutableURLRequest = URLRequest(url: url)
         mutableURLRequest.httpMethod = Method.post.rawValue
         let boundaryConstant = "NET-POST-boundary-\(arc4random())-\(arc4random())"
-        let contentType = "multipart/form-data;boundary=" + boundaryConstant
+        let contentType = "multipart/form-data;boundary="+boundaryConstant
         mutableURLRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
 
         var uploadData = Data()
@@ -250,7 +266,7 @@ class SimpleNetworking {
                 }
                 uploadData.append(contentTypeData)
                 uploadData.append(imageData)
-                
+
             } else {
                 guard let encodeDispositionData = "Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(value)".data(using: .utf8) else {
                     return (nil, nil)
@@ -258,9 +274,9 @@ class SimpleNetworking {
                 uploadData.append(encodeDispositionData)
             }
         }
-        
+
         uploadData.append("\r\n--\(boundaryConstant)--\r\n".data(using: .utf8)!)
-        
+
         return (encoding.encode(mutableURLRequest, parameters: nil), uploadData)
     }
 }
